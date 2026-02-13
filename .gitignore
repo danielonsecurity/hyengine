@@ -1,0 +1,27 @@
+## Python
+
+# Packages
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+build
+_build
+/dist/*
+*.egg-info/
+*.egg
+
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Environment-specific files
+.env
+*.env
+*.venv
+.venv/
+
+# Poetry virtual environment
+poetry.lock
