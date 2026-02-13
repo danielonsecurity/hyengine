@@ -52,24 +52,21 @@ class HyConverter:
         
         return hy.models.String(str(value))
 
+
     def model_to_py(self, model: Any) -> Any:
-        # --- ORDER MATTERS: Specific subclasses first ---
-        
-        # 1. Keywords (Specific subclass of String)
+        # 1. Handle Hy-specific models first (order of specificity)
         if isinstance(model, hy.models.Keyword):
             return str(model).lstrip(':')
         
-        # 2. Plain Strings
         if isinstance(model, hy.models.String):
             return str(model)
             
-        # 3. Numbers
         if isinstance(model, hy.models.Integer):
             return int(model)
+            
         if isinstance(model, hy.models.Float):
             return float(model)
             
-        # 4. Symbols (Booleans/None fallbacks)
         if isinstance(model, hy.models.Symbol):
             s = str(model)
             if s == "True": return True
@@ -77,7 +74,6 @@ class HyConverter:
             if s == "None": return None
             return s
 
-        # 5. Dictionaries (Specific subclass of Sequence/Object)
         if isinstance(model, hy.models.Dict):
             res = {}
             it = iter(model)
@@ -85,25 +81,29 @@ class HyConverter:
                 try:
                     v = next(it)
                     res[self.model_to_py(k)] = self.model_to_py(v)
-                except StopIteration:
-                    break
+                except StopIteration: break
             return res
 
-        # 6. Expressions (Specific subclass of List)
+        # 2. NEW/FIXED: Handle standard Python collections containing Hy objects
+        # This is what hy_eval returns for {} and []
+        if isinstance(model, dict):
+            return {self.model_to_py(k): self.model_to_py(v) for k, v in model.items()}
+            
+        if isinstance(model, (list, tuple)) and not isinstance(model, hy.models.Object):
+            return [self.model_to_py(item) for item in model]
+
+        # 3. Hy Expressions and Lists
         if isinstance(model, hy.models.Expression):
             if len(model) > 0:
                 symbol = str(model[0])
                 if symbol == "datetime":
-                    try:
-                        return datetime(*[self.model_to_py(arg) for arg in model[1:]])
-                    except (TypeError, ValueError):
-                        pass
+                    try: return datetime(*[self.model_to_py(arg) for arg in model[1:]])
+                    except: pass
                 if symbol in self.expression_decoders:
                     return self.expression_decoders[symbol](model, self)
             return [self.model_to_py(item) for item in model]
 
-        # 7. Generic Lists/Sequences
-        if isinstance(model, (hy.models.List, list, tuple)):
+        if isinstance(model, hy.models.List):
             return [self.model_to_py(item) for item in model]
         
         return model
