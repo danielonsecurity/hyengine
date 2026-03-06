@@ -88,9 +88,10 @@ class HyConverter:
         # This is what hy_eval returns for {} and []
         if isinstance(model, dict):
             return {self.model_to_py(k): self.model_to_py(v) for k, v in model.items()}
-            
+        
         if isinstance(model, (list, tuple)) and not isinstance(model, hy.models.Object):
             return [self.model_to_py(item) for item in model]
+
 
         # 3. Hy Expressions and Lists
         if isinstance(model, hy.models.Expression):

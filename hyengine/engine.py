@@ -2,6 +2,8 @@ import hy
 from hy.compiler import hy_eval
 from hy.models import Symbol, Expression
 from .converter import engine_converter
+from .errors import HyEngineError, HyEvaluationError
+from .ast import safe_format
 
 class HyEngine:
     """The base resolver and evaluator."""
@@ -10,13 +12,18 @@ class HyEngine:
         self.globals = globals_dict or {}
 
     def evaluate_expression(self, expr, locals_dict=None):
-        if locals_dict is None: locals_dict = {}
-        # Ensure dot-operator handling or standard eval
+        if locals_dict is None:
+            locals_dict = {}
         try:
             return hy_eval(expr, {**self.globals, **locals_dict}, "__main__")
+        except HyEngineError:
+            raise
         except Exception as e:
-            # Re-implement your handle_dot_operator logic here if needed
-            raise e
+            raise HyEvaluationError(
+                str(e),
+                expression=safe_format(expr),
+                cause=e,
+            ) from e
 
     def resolve_value(self, expr, context=None, locals_dict=None):
         """The recursive resolver from HyResolver."""

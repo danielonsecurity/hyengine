@@ -1,6 +1,22 @@
 import hy
 from io import StringIO
 
+
+def safe_format(expr, max_len=120):
+    """Format a Hy expression for error messages. Never raises."""
+    try:
+        if expr is None:
+            return "None"
+        s = HyASTManager().format_expression(expr)
+        if len(s) > max_len:
+            return s[:max_len] + "..."
+        return s
+    except Exception:
+        try:
+            return repr(expr)[:max_len]
+        except Exception:
+            return "<unprintable expression>"
+
 class HyASTManager:
     def __init__(self):
         self.header_comments = []
