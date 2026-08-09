@@ -32,9 +32,12 @@ class HyConverter:
         if isinstance(value, dict):
             parts = []
             for k, v in value.items():
-                # Ensure we don't double-colon if the string already has one
                 key_str = str(k).lstrip(':')
-                parts.append(hy.models.Keyword(key_str))
+                if "." in key_str or " " in key_str or "/" in key_str:
+                    parts.append(hy.models.String(key_str))
+                else:
+                    parts.append(hy.models.Keyword(key_str))
+                    
                 parts.append(self.py_to_model(v))
             return hy.models.Dict(parts)
         

@@ -58,7 +58,10 @@ class HyASTManager:
     def format_expression(self, model):
         """Recursive formatter for human-readable Hy source."""
         if isinstance(model, hy.models.String):
-            return f'"{model}"'
+            content = str(model)
+            if '"' in content or "\n" in content:
+                return f'#[logic[\n{content}]logic]'
+            return f'"{content}"'
         if isinstance(model, hy.models.Symbol):
             return str(model)
         if isinstance(model, hy.models.Keyword):

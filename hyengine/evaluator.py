@@ -79,12 +79,13 @@ def evaluate_file(path, locals_dict=None):
     if not expressions:
         return {}
 
-    # Shared namespace — same dict passed to every expression so that
-    # bindings from expression N are visible in expression N+1.
-    # hy_eval mutates the dict in place (confirmed via live PDB inspection).
-    shared_locals = locals_dict if locals_dict is not None else {}
+    # FIX: Use the passed dict directly instead of copying
+    if locals_dict is not None:
+        shared_locals = locals_dict
+    else:
+        shared_locals = {}
     if "__builtins__" not in shared_locals:
-        shared_locals["__builtins__"] = globals().get("__builtins__", {})
+        shared_locals["__builtins__"] = __builtins__
 
     result = None
     for i, expr in enumerate(expressions):
@@ -102,6 +103,7 @@ def evaluate_file(path, locals_dict=None):
                 cause=e,
             ) from e
 
+    # No need for the sync-back block anymore since we used the dict directly
     return result
 
 
@@ -117,6 +119,46 @@ def evaluate_file_normalized(path, locals_dict=None):
     res = evaluate_file(path, locals_dict)
     return _normalize(res)
 
+
+def evaluate_string(content: str, locals_dict=None, source_name="<string>"):
+    content = content.strip()
+    if not content:
+        return {}
+
+    try:
+        expressions = list(hy.read_many(content, filename=source_name))
+    except Exception as e:
+        msg = _format_parse_error(e, content, source_name)
+        raise HyParseError(msg, file=source_name, cause=e) from e
+
+    if not expressions:
+        return {}
+
+    # FIX: Same pattern — use directly, don't copy
+    if locals_dict is not None:
+        shared_locals = locals_dict
+    else:
+        shared_locals = {}
+    if "__builtins__" not in shared_locals:
+        shared_locals["__builtins__"] = __builtins__
+
+    result = None
+    for i, expr in enumerate(expressions):
+        try:
+            res = hy.compiler.hy_eval(expr, shared_locals, "__main__")
+            result = engine_converter.model_to_py(res)
+        except HyEngineError:
+            raise
+        except Exception as e:
+            raise HyEvaluationError(
+                str(e),
+                file=source_name,
+                expression=safe_format(expr),
+                index=i,
+                cause=e,
+            ) from e
+
+    return result
 
 def _normalize(obj):
     from dataclasses import is_dataclass
@@ -134,3 +176,4 @@ def _normalize(obj):
     if obj_type == "Symbol":
         return s_obj.replace("-", "_")
     return obj
+
