@@ -1,3 +1,4 @@
+import os
 import hy
 from .models import HyNode
 from .converter import engine_converter
