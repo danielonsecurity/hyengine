@@ -207,3 +207,70 @@ class TestCustomKeys:
     def test_names_in_returns_keys(self, by_file):
         s = DefinitionStore(list(by_file), key=self.key).load()
         assert s.names_in("home.hy") == [("home", "Sleep")]
+
+
+def test_on_error_skips_broken_files_and_reports_them(tmp_path):
+    layer = tmp_path / "items"
+    layer.mkdir()
+    (layer / "good.hy").write_text("(def-p A (v 1))\n")
+    (layer / "bad.hy").write_text("(def-p B (v (call-something)))\n")
+    errors = []
+    store = DefinitionStore([layer], on_error=lambda path, exc: errors.append(path.name)).load()
+    assert store.names() == ["A"]
+    assert errors == ["bad.hy"]
+
+
+def test_without_on_error_broken_files_raise(tmp_path):
+    from hyengine.errors import HyDataError
+
+    layer = tmp_path / "items"
+    layer.mkdir()
+    (layer / "bad.hy").write_text("(def-p B (v (call-something)))\n")
+    with pytest.raises(HyDataError):
+        DefinitionStore([layer]).load()
+
+
+class TestConcurrentWriters:
+    """Two processes (e.g. a web API and a scheduler) using the same files."""
+
+    @staticmethod
+    def touch_later(path):
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000))
+
+    def test_refresh_reloads_files_changed_by_someone_else(self, layers):
+        mine = store_for(layers)
+        other = store_for(layers)
+        other.put(Definition(head="def-p", name="C", props={"v": 33}))
+        other.save()
+        self.touch_later(layers[1] / "work.hy")
+        assert mine.changed_files() == [layers[1] / "work.hy"]
+        assert mine.refresh() is True
+        assert mine.get("C").props["v"] == 33
+        assert mine.refresh() is False
+
+    def test_refresh_sees_new_and_deleted_files(self, layers):
+        mine = store_for(layers)
+        (layers[1] / "extra.hy").write_text("(def-p X (v 9))\n")
+        (layers[1] / "work.hy").unlink()
+        assert mine.refresh() is True
+        assert mine.get("X").props["v"] == 9 and mine.get("C") is None
+
+    def test_saving_over_a_file_changed_on_disk_is_a_conflict(self, layers):
+        from hyengine.errors import StoreConflict
+
+        mine = store_for(layers)
+        (layers[1] / "work.hy").write_text("(def-p C (v 300))\n(def-p D (v 4))\n")
+        self.touch_later(layers[1] / "work.hy")
+        mine.put(Definition(head="def-p", name="C", props={"v": 30}))
+        with pytest.raises(StoreConflict, match="work.hy"):
+            mine.save()
+        assert "(v 300)" in (layers[1] / "work.hy").read_text()  # the other writer's change survives
+
+    def test_own_saves_are_not_conflicts(self, layers):
+        mine = store_for(layers)
+        for value in (1, 2, 3):
+            mine.put(Definition(head="def-p", name="C", props={"v": value}))
+            mine.save()
+        assert store_for(layers).get("C").props["v"] == 3
+        assert mine.changed_files() == []

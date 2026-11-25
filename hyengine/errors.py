@@ -46,3 +46,8 @@ class HyValidationError(HyEngineError):
 class HyDataError(HyEngineError):
     """A data file contains something that is not data (e.g. an unquoted call)."""
     pass
+
+
+class StoreConflict(HyEngineError):
+    """A file was changed on disk by someone else since a DefinitionStore read it."""
+    pass

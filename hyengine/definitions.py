@@ -41,6 +41,8 @@ class Definition:
     # written as (def-x NAME) rather than (def-x "NAME"); None = not specified
     # (a replaced definition then keeps the style of the one it replaces)
     symbol_name: Optional[bool] = field(default=None, compare=False)
+    # props written as `:key value` pairs on one line instead of `(key value)` forms
+    keyword_props: bool = field(default=False, compare=False)
     source_file: Optional[Path] = field(default=None, compare=False)
 
 
@@ -193,9 +195,21 @@ def read_definitions(
             raise HyDataError(f"{source_name}: {head} needs a name, got {_src(name_model)}")
 
         label = f"({head} {name})"
-        args, props = [], {}
-        for item in form[2:]:
-            if isinstance(item, hy.models.Expression) and len(item) and isinstance(item[0], hy.models.Symbol):
+        args, props, keyword_props = [], {}, False
+        items = list(form[2:])
+        index = 0
+        while index < len(items):
+            item = items[index]
+            index += 1
+            if isinstance(item, hy.models.Keyword):
+                key = str(item).lstrip(":")
+                if index >= len(items):
+                    raise HyDataError(f"{_location(source_name, label, key)}: keyword :{key} has no value")
+                props[key] = decode_data(items[index], converter, _location(source_name, label, key),
+                                         code_values, source)
+                index += 1
+                keyword_props = True
+            elif isinstance(item, hy.models.Expression) and len(item) and isinstance(item[0], hy.models.Symbol):
                 key = str(item[0])
                 where = _location(source_name, label, key)
                 vals = [decode_data(v, converter, where, code_values, source) for v in item[1:]]
@@ -206,8 +220,8 @@ def read_definitions(
                 args.append(decode_data(item, converter, _location(source_name, label, None), code_values, source))
 
         definitions.append(
-            Definition(head=head, name=name, props=props, args=args,
-                       symbol_name=symbol_name, source_file=path)
+            Definition(head=head, name=name, props=props, args=args, symbol_name=symbol_name,
+                       keyword_props=keyword_props, source_file=path)
         )
     return definitions
 
@@ -243,6 +257,12 @@ def format_definition(
             head.append(arg)
         else:
             head.append(format_value(arg, converter, code_values))
+
+    if definition.keyword_props:
+        for key, value in definition.props.items():
+            values = value if isinstance(value, tuple) else (value,)
+            head.append(f":{key} " + " ".join(format_value(v, converter, code_values) for v in values))
+        return "(" + " ".join(head) + ")"
 
     lines = ["(" + " ".join(head)]
     for key, value in definition.props.items():

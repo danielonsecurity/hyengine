@@ -17,10 +17,11 @@ by path, mtime and size, so unchanged files are not parsed again.
 import hashlib
 import pickle
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
+from typing import Callable, Dict, Hashable, Iterable, Iterator, List, Optional, Tuple, Union
 
 from .converter import HyConverter, engine_converter
 from .definitions import Definition, format_definition, header_comments, read_definitions
+from .errors import StoreConflict
 
 CACHE_VERSION = 1
 
@@ -37,7 +38,15 @@ class DefinitionStore:
         cache_dir: Optional[PathLike] = None,
         converter: HyConverter = engine_converter,
         code_values: bool = False,
+        key: Optional[Callable[[Definition, Path], Hashable]] = None,
+        on_error: Optional[Callable[[Path, Exception], None]] = None,
     ):
+        # When given, a file that cannot be read is reported here and skipped
+        # (instead of failing the whole load).
+        self.on_error = on_error
+        # Identity of a definition; by default its name. Use e.g.
+        # key=lambda d, path: (path.stem, d.name) when names repeat across files.
+        self._key = key or (lambda definition, path: definition.name)
         self.code_values = code_values  # True for type/trait files (code kept as Code)
         self.layers: List[Path] = [Path(p) for p in layers]
         if not self.layers:
@@ -56,6 +65,8 @@ class DefinitionStore:
         self._file_names: Dict[Path, List[str]] = {}
         self._file_headers: Dict[Path, List[str]] = {}
         self._dirty: set = set()
+        # file -> (mtime_ns, size) when this store last read or wrote it
+        self._file_stats: Dict[Path, Tuple[int, int]] = {}
 
     @property
     def writable_layer(self) -> int:
@@ -68,14 +79,43 @@ class DefinitionStore:
             if not directory.is_dir():
                 continue
             for path in sorted(directory.glob("*.hy")):
-                definitions, header = self._read_file(path)
+                self._file_stats[path] = _stat(path)
+                try:
+                    definitions, header = self._read_file(path)
+                except Exception as e:
+                    if self.on_error is None:
+                        raise
+                    self.on_error(path, e)
+                    continue
                 self._file_headers[path] = header
                 self._file_names[path] = []
                 for definition in definitions:
-                    self._candidates.setdefault(definition.name, {})[index] = (path, definition)
-                    if definition.name not in self._file_names[path]:
-                        self._file_names[path].append(definition.name)
+                    key = self._key(definition, path)
+                    self._candidates.setdefault(key, {})[index] = (path, definition)
+                    if key not in self._file_names[path]:
+                        self._file_names[path].append(key)
         return self
+
+    # ------------------------------------------------------------------ other writers
+    def changed_files(self) -> List[Path]:
+        """Files created, modified or deleted on disk since this store read/wrote them."""
+        current: Dict[Path, Tuple[int, int]] = {}
+        for directory in self.layers:
+            if directory.is_dir():
+                for path in directory.glob("*.hy"):
+                    current[path] = _stat(path)
+        return sorted(p for p in set(current) | set(self._file_stats)
+                      if current.get(p) != self._file_stats.get(p))
+
+    def refresh(self) -> bool:
+        """Reload if any file changed on disk (unchanged files come from the cache).
+
+        Returns True when something was reloaded. Unsaved changes are discarded.
+        """
+        if not self.changed_files():
+            return False
+        self.load()
+        return True
 
     def _read_file(self, path: Path) -> Tuple[List[Definition], List[str]]:
         stat = path.stat()
@@ -154,38 +194,39 @@ class DefinitionStore:
         return path
 
     # ------------------------------------------------------------------ writing
-    def put(self, definition: Definition, file: Optional[PathLike] = None) -> None:
-        """Add or replace a definition in the writable layer.
+    def put(self, definition: Definition, file: Optional[PathLike] = None) -> Hashable:
+        """Add or replace a definition in the writable layer; returns its key.
 
         Without ``file``, an item already in the writable layer stays in its file;
-        anything else goes to the default file. With ``file``, it moves there.
+        anything else goes to the default file. With ``file``, it goes there.
         """
         top = self.writable_layer
-        current = self._candidates.get(definition.name, {}).get(top)
-        if file is not None:
-            target = self._resolve_file(file)
-        elif current is not None:
+        target = (
+            self._resolve_file(file) if file is not None else self.layers[top] / self.default_file
+        )
+        key = self._key(definition, target)
+        current = self._candidates.get(key, {}).get(top)
+        if file is None and current is not None:
             target = current[0]
-        else:
-            target = self.layers[top] / self.default_file
 
-        previous = self._effective(definition.name)
+        previous = self._effective(key)
         if definition.symbol_name is None and previous is not None:
             definition.symbol_name = previous[1].symbol_name
 
         if current is not None and current[0] != target:
-            self._file_names[current[0]].remove(definition.name)
+            self._file_names[current[0]].remove(key)
             self._dirty.add(current[0])
 
         names = self._file_names.setdefault(target, [])
-        if definition.name not in names:
-            names.append(definition.name)
+        if key not in names:
+            names.append(key)
         definition.source_file = target
-        self._candidates.setdefault(definition.name, {})[top] = (target, definition)
+        self._candidates.setdefault(key, {})[top] = (target, definition)
         self._dirty.add(target)
+        return key
 
-    def remove(self, name: str) -> bool:
-        """Remove the writable-layer definition of ``name``.
+    def remove(self, name: Hashable) -> bool:
+        """Remove the writable-layer definition with key ``name``.
 
         Returns False if there is none (items that only exist in lower layers
         cannot be removed). Removing an override reveals the lower definition.
@@ -204,21 +245,34 @@ class DefinitionStore:
         """Rewrite every changed file of the writable layer."""
         top = self.writable_layer
         for path in sorted(self._dirty):
+            on_disk = _stat(path) if path.exists() else None
+            if on_disk != self._file_stats.get(path):
+                raise StoreConflict(
+                    f"{path} was changed on disk since it was read; refresh() and apply the change again."
+                )
+        for path in sorted(self._dirty):
             names = self._file_names.get(path, [])
             if not names:
                 if path.exists():
                     path.unlink()
                 self._file_names.pop(path, None)
+                self._file_stats.pop(path, None)
                 continue
             blocks = [
-                format_definition(self._candidates[name][top][1], self.converter, self.code_values)
-                for name in names
+                format_definition(self._candidates[key][top][1], self.converter, self.code_values)
+                for key in names
             ]
             header = self._file_headers.get(path, [])
             text = ("\n".join(header) + "\n\n" if header else "") + "\n\n".join(blocks) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
+            self._file_stats[path] = _stat(path)
         self._dirty.clear()
+
+
+def _stat(path: Path) -> Tuple[int, int]:
+    stat = path.stat()
+    return (stat.st_mtime_ns, stat.st_size)
 
 
 def _hy_name(name: str) -> str:

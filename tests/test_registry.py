@@ -58,3 +58,8 @@ def test_runs_do_not_leak_names_into_each_other(registry):
 
 def test_source_strings_are_accepted(registry):
     assert registry.run("(add-numbers 1 2)") == 3
+
+
+def test_self_and_code_are_valid_local_names(registry):
+    assert registry.run(Code("(+ self code)"), self=1, code=2) == 3
+    assert registry.scope(self=5)["self"] == 5

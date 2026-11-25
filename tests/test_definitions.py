@@ -151,3 +151,31 @@ class TestCodeValuesMode:
         [d] = read_definitions(self.SOURCE, code_values=True)
         [again] = read_definitions(format_definition(d), code_values=True)
         assert again == d
+
+
+class TestKeywordProps:
+    """Forms like (log-context "Work" :start_time (datetime ...) :color "#f00")."""
+
+    SOURCE = '(log-context "Deep Work" :start_time (datetime 2026 11 25 17 44 13 40900) :color "#ff0000")'
+
+    def test_keyword_pairs_are_props(self):
+        [d] = read_definitions(self.SOURCE)
+        assert d.name == "Deep Work"
+        assert d.props == {"start_time": datetime(2026, 11, 25, 17, 44, 13, 40900), "color": "#ff0000"}
+        assert d.args == []
+        assert d.keyword_props
+
+    def test_written_back_in_keyword_style(self):
+        [d] = read_definitions(self.SOURCE)
+        assert format_definition(d) == (
+            '(log-context "Deep Work" :start_time (datetime 2026 11 25 17 44 13 40900) :color "#ff0000")'
+        )
+
+    def test_new_definitions_can_choose_keyword_style(self):
+        d = Definition(head="log-context", name="Break", props={"color": "#00f"}, keyword_props=True)
+        [again] = read_definitions(format_definition(d))
+        assert again == d and again.keyword_props
+
+    def test_a_dangling_keyword_is_an_error(self):
+        with pytest.raises(HyDataError, match="has no value"):
+            read_definitions('(log-context "Work" :start_time)')

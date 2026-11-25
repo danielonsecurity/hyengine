@@ -52,7 +52,7 @@ class HyRegistry:
                     scope[spelling] = item
         return scope
 
-    def scope(self, **extra: Any) -> Dict[str, Any]:
+    def scope(self, /, **extra: Any) -> Dict[str, Any]:
         """A fresh evaluation scope: registry names + time helpers + ``extra``."""
         from .evaluator import default_scope
 
@@ -62,7 +62,7 @@ class HyRegistry:
                 scope[spelling] = value
         return default_scope(scope)
 
-    def run(self, code: Union[Code, str], **locals_: Any) -> Any:
+    def run(self, code: Union[Code, str], /, **locals_: Any) -> Any:
         """Evaluate one Hy form with the registry (and ``locals_``) in scope.
 
         The scope is passed as *globals*, so functions created by the code (e.g.
