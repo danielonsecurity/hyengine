@@ -5,13 +5,12 @@ from hy.models import Symbol, Expression
 from .converter import engine_converter
 from .errors import HyEngineError, HyEvaluationError
 from .ast import safe_format
+from .evaluator import default_scope
 
 class HyEngine:
     def __init__(self, globals_dict=None):
         # Persistent scope for this engine instance
-        self.scope = globals_dict or {}
-        if "__builtins__" not in self.scope:
-            self.scope["__builtins__"] = __builtins__
+        self.scope = default_scope(globals_dict if globals_dict is not None else {})
 
     def evaluate_expression(self, expr, locals_dict=None):
         """Evaluates an AST expression within the persistent scope."""

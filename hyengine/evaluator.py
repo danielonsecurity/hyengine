@@ -1,8 +1,20 @@
 import hy
-from .converter import engine_converter
+from .converter import EVAL_SCOPE, engine_converter
 from .errors import HyEngineError, HyParseError, HyEvaluationError
 from .ast import safe_format
 from pathlib import Path
+
+
+def default_scope(scope):
+    """Ensure builtins and the names converted values rely on are in ``scope``.
+
+    Uses setdefault, so anything the caller already defined wins. Mutates and
+    returns ``scope`` (callers rely on sharing the dict across evaluations).
+    """
+    scope.setdefault("__builtins__", __builtins__)
+    for name, value in EVAL_SCOPE.items():
+        scope.setdefault(name, value)
+    return scope
 
 
 def _extract_source_line(content, lineno):
@@ -44,8 +56,7 @@ def _format_parse_error(e, content, path):
 def evaluate_expression(expr, locals_dict=None, *, source_file=None, index=None):
     if locals_dict is None:
         locals_dict = {}
-    if "__builtins__" not in locals_dict:
-        locals_dict["__builtins__"] = globals().get("__builtins__", {})
+    default_scope(locals_dict)
     try:
         res = hy.compiler.hy_eval(expr, locals_dict, "__main__")
         return engine_converter.model_to_py(res)
@@ -84,8 +95,7 @@ def evaluate_file(path, locals_dict=None):
         shared_locals = locals_dict
     else:
         shared_locals = {}
-    if "__builtins__" not in shared_locals:
-        shared_locals["__builtins__"] = __builtins__
+    default_scope(shared_locals)
 
     result = None
     for i, expr in enumerate(expressions):
@@ -139,8 +149,7 @@ def evaluate_string(content: str, locals_dict=None, source_name="<string>"):
         shared_locals = locals_dict
     else:
         shared_locals = {}
-    if "__builtins__" not in shared_locals:
-        shared_locals["__builtins__"] = __builtins__
+    default_scope(shared_locals)
 
     result = None
     for i, expr in enumerate(expressions):

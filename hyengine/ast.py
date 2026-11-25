@@ -115,6 +115,15 @@ class HyASTManager:
                 raw=model,
             )
 
+        if isinstance(model, hy.models.Symbol) and str(model) in ("True", "False", "None"):
+            return HyNode(
+                type="literal",
+                value=engine_converter.model_to_py(model),
+                original=str(model),
+                is_dynamic=False,
+                raw=model,
+            )
+
         if isinstance(model, hy.models.Symbol):
             return HyNode(
                 type="symbol",
