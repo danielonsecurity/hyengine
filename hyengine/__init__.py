@@ -2,6 +2,9 @@ from .engine import HyEngine
 from .converter import engine_converter
 from .ast import HyASTManager
 from .utils import normalize_data
+from .values import Code
+from .definitions import Definition, decode_data, format_definition, read_definitions
+from .store import DefinitionStore
 
 
 def parse_data(content: str):

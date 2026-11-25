@@ -41,3 +41,8 @@ class HyCommandError(HyEngineError):
 class HyValidationError(HyEngineError):
     """Wrong shape, missing required key, invalid enum value, etc."""
     pass
+
+
+class HyDataError(HyEngineError):
+    """A data file contains something that is not data (e.g. an unquoted call)."""
+    pass

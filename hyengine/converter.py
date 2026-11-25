@@ -3,6 +3,8 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List, Tuple
 
+from .values import Code
+
 
 # Names a converted value may reference when its source is *evaluated*.
 # The evaluator puts these in scope by default (see evaluator.default_scope).
@@ -61,6 +63,9 @@ class HyConverter:
         for type_obj, encoder in self.encoders.items():
             if isinstance(value, type_obj):
                 return encoder(value, self)
+
+        if isinstance(value, Code):  # code kept as data is written back quoted
+            return hy.models.Expression([_sym("quote"), value.model])
 
         # datetime must be checked before date (datetime is a date subclass)
         if isinstance(value, datetime):
